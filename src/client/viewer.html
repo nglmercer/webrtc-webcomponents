@@ -1,0 +1,100 @@
+// viewer.html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Viewer</title>
+    <style>
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .stream {
+            width: 100%;
+            max-width: 640px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Viewer</h2>
+        <video id="stream" class="stream" autoplay></video>
+    </div>
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const streamId = urlParams.get('streamId');
+        const ws = new WebSocket('ws://' + window.location.hostname + ':3000');
+        console.log('Connecting to server...', streamId, ws);
+        let peerConnection = null;
+
+        if (!streamId) {
+            alert('No stream ID provided!');
+        }
+
+        ws.onopen = () => {
+            console.log('Connected to server');
+            ws.send(JSON.stringify({
+                type: 'join',
+                roomId: streamId
+            }));
+        };
+
+        ws.onmessage = async (event) => {
+            const message = JSON.parse(event.data);
+            
+            switch (message.type) {
+                case 'offer':
+                    await handleOffer(message.data);
+                    break;
+                    
+                case 'ice-candidate':
+                    if (message.data) {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(message.data));
+                    }
+                    break;
+            }
+        };
+
+        async function handleOffer(offer) {
+            try {
+                if (peerConnection) {
+                    peerConnection.close();
+                }
+
+                peerConnection = new RTCPeerConnection({
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' }
+                    ]
+                });
+
+                peerConnection.ontrack = (event) => {
+                    document.getElementById('stream').srcObject = event.streams[0];
+                };
+
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        ws.send(JSON.stringify({
+                            type: 'ice-candidate',
+                            roomId: streamId,
+                            data: event.candidate
+                        }));
+                    }
+                };
+
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+
+                ws.send(JSON.stringify({
+                    type: 'answer',
+                    roomId: streamId,
+                    data: answer
+                }));
+            } catch (error) {
+                console.error('Error handling offer:', error);
+            }
+        }
+    </script>
+</body>
+</html>

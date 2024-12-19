@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebRTC Chat</title>
-    <link rel="stylesheet" href="./src/client/styles.css">
-    <script src="./src/client/webcomponents.js"></script>
+    <link rel="stylesheet" href="./styles.css">
+    <script src="./webcomponents.js"></script>
 </head>
 <body>
     <div class="sidebar">
@@ -17,33 +17,18 @@
     </div>
 
     <div class="main-content">
-        <div class="video-container">
-            <div class="video-grid">
-              <div class="video-item">
-                <video id="localVideo" autoplay playsinline muted></video>
-                <div class="video-label">You</div>
-              </div>
-              <div class="video-item">
-                <video id="remoteVideo" autoplay playsinline></video>
-                <div class="video-label">Remote User</div>
-              </div>
-            </div>
+        <group-call id="group-call"></group-call>
             <div class="call-controls">
-              <button id="toggleVideo" class="control-button">Toggle Video</button>
-              <button id="toggleAudio" class="control-button">Toggle Audio</button>
-            </div>
-          </div>
-        <div class="call-controls">
-            <input type="text" id="target-user" placeholder="Enter user ID to call">
-            <button id="start-call" class="call-button">Start Call</button>
-            <button id="end-call" class="end-button" disabled>End Call</button>
-        </div>
-        
-        <div id="active-call" class="active-call" style="display: none">
-            <h3>In Call with: <span id="remote-user"></span></h3>
-            <div id="call-timer" class="call-timer">00:00</div>
-            <div id="call-status">Not connected</div>
-        </div>
+        <input type="text" id="target-user" placeholder="Enter user ID to call">
+        <button id="start-call" class="call-button">Start Call</button>
+        <button id="end-call" class="end-button" disabled>End Call</button>
+    </div>
+    
+    <div id="active-call" class="active-call" style="display: none">
+        <h3>In Call with: <span id="remote-user"></span></h3>
+        <div id="call-timer" class="call-timer">00:00</div>
+        <div id="call-status">Not connected</div>
+    </div>
         <chat-component id="chat" theme="light"></chat-component>
         <form id="message-form">
             <input type="text" id="message-input" placeholder="Type your message..." disabled>
@@ -53,8 +38,8 @@
 
     </div>
     <script type="module">
-        import { WebRTCManager } from './src/client/webrtc.js';
-        import { ChannelManager } from './src/client/channelManager.js';
+        import { WebRTCManager } from './webrtc.js';
+        import { ChannelManager } from './channelManager.js';
 
         const chatComponent = document.getElementById('chat');
         const currentTheme = chatComponent.getAttribute('theme');
@@ -65,17 +50,15 @@
         let ws;
         let currentRoom = null;
         let currentUserId = null;
-        let callTimer;
-        let callStartTime;
-        let activeCall = false;
         const webrtc = new WebRTCManager();
-        const startCallBtn = document.getElementById('start-call');
-        const endCallBtn = document.getElementById('end-call');
-        const targetUserInput = document.getElementById('target-user');
-        const activeCallDiv = document.getElementById('active-call');
-        const remoteUserSpan = document.getElementById('remote-user');
-        const callStatus = document.getElementById('call-status');
-        const timerDisplay = document.getElementById('call-timer');
+        const groupCall = document.getElementById('group-call');
+        groupCall.setWebRTCManager(webrtc, currentUserId);
+
+        // Añadir un stream remoto cuando se recibe una pista
+        webrtc.onStream = (stream, userId) => {
+        groupCall.addRemoteStream(userId, stream);
+        };
+
         const channelManager = new ChannelManager(
             document.getElementById('channel-list'),
             handleChannelSelect
@@ -207,70 +190,6 @@
         };
 
         connect();
-        function updateTimer() {
-            const elapsed = Math.floor((Date.now() - callStartTime) / 1000);
-            const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
-            const seconds = (elapsed % 60).toString().padStart(2, '0');
-            timerDisplay.textContent = `${minutes}:${seconds}`;
-        }
-
-        function startTimer() {
-            callStartTime = Date.now();
-            callTimer = setInterval(updateTimer, 1000);
-        }
-
-        function stopTimer() {
-            clearInterval(callTimer);
-            timerDisplay.textContent = '00:00';
-        }
-
-        async function startCall() {
-            const targetUserId = targetUserInput.value.trim();
-            if (!targetUserId) return;
-
-            try {
-                const offer = await webrtc.initiateCall(targetUserId);
-                activeCall = true;
-                startCallBtn.disabled = true;
-                endCallBtn.disabled = false;
-                activeCallDiv.style.display = 'block';
-                remoteUserSpan.textContent = targetUserId;
-                callStatus.textContent = 'Calling...';
-                startTimer();
-                
-                // Here you would normally send the offer to the target user
-                // through your signaling channel
-                console.log('Call offer created:', offer);
-            } catch (error) {
-                console.error('Failed to start call:', error);
-                callStatus.textContent = 'Call failed: ' + error.message;
-            }
-        }
-
-        async function endCall() {
-            const targetUserId = targetUserInput.value.trim();
-            if (!targetUserId) return;
-
-            await webrtc.endCall(targetUserId);
-            activeCall = false;
-            startCallBtn.disabled = false;
-            endCallBtn.disabled = true;
-            activeCallDiv.style.display = 'none';
-            stopTimer();
-            callStatus.textContent = 'Call ended';
-        }
-
-        // Handle incoming stream
-        webrtc.onStream = (stream, userId) => {
-            callStatus.textContent = 'Connected';
-            // Create an audio element to play the remote stream
-            const audio = new Audio();
-            audio.srcObject = stream;
-            audio.play();
-        };
-
-        startCallBtn.addEventListener('click', startCall);
-        endCallBtn.addEventListener('click', endCall);
     </script>
 </body>
 </html>
