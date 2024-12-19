@@ -1,0 +1,12 @@
+{
+  "name": "webrtc-chat",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server/server.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}

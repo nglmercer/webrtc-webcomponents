@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Chat</title>
+    <link rel="stylesheet" href="./src/client/styles.css">
+    <script src="./src/client/webcomponents.js"></script>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="channels-title">Channels</div>
+        <div id="channel-list" class="channel-list"></div>
+        <div class="user-info" id="user-info">
+            Not connected
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="video-container">
+            <div class="video-grid">
+              <div class="video-item">
+                <video id="localVideo" autoplay playsinline muted></video>
+                <div class="video-label">You</div>
+              </div>
+              <div class="video-item">
+                <video id="remoteVideo" autoplay playsinline></video>
+                <div class="video-label">Remote User</div>
+              </div>
+            </div>
+            <div class="call-controls">
+              <button id="toggleVideo" class="control-button">Toggle Video</button>
+              <button id="toggleAudio" class="control-button">Toggle Audio</button>
+            </div>
+          </div>
+        <div class="call-controls">
+            <input type="text" id="target-user" placeholder="Enter user ID to call">
+            <button id="start-call" class="call-button">Start Call</button>
+            <button id="end-call" class="end-button" disabled>End Call</button>
+        </div>
+        
+        <div id="active-call" class="active-call" style="display: none">
+            <h3>In Call with: <span id="remote-user"></span></h3>
+            <div id="call-timer" class="call-timer">00:00</div>
+            <div id="call-status">Not connected</div>
+        </div>
+        <chat-component id="chat" theme="light"></chat-component>
+        <form id="message-form">
+            <input type="text" id="message-input" placeholder="Type your message..." disabled>
+            <input type="text" name="targetUserId" id="target-user-id" placeholder="Target user ID...">
+            <button type="submit" disabled>Send</button>
+        </form>
+
+    </div>
+    <script type="module">
+        import { WebRTCManager } from './src/client/webrtc.js';
+        import { ChannelManager } from './src/client/channelManager.js';
+
+        const chatComponent = document.getElementById('chat');
+        const currentTheme = chatComponent.getAttribute('theme');
+        chatComponent.setAttribute('theme', currentTheme === 'light' ? 'dark' : 'light');
+        chatComponent.addMessage('Hola, este es un mensaje de prueba',false);
+        chatComponent.addPrivateMessage('Usuario123', 'Este es un mensaje privado');
+
+        let ws;
+        let currentRoom = null;
+        let currentUserId = null;
+        let callTimer;
+        let callStartTime;
+        let activeCall = false;
+        const webrtc = new WebRTCManager();
+        const startCallBtn = document.getElementById('start-call');
+        const endCallBtn = document.getElementById('end-call');
+        const targetUserInput = document.getElementById('target-user');
+        const activeCallDiv = document.getElementById('active-call');
+        const remoteUserSpan = document.getElementById('remote-user');
+        const callStatus = document.getElementById('call-status');
+        const timerDisplay = document.getElementById('call-timer');
+        const channelManager = new ChannelManager(
+            document.getElementById('channel-list'),
+            handleChannelSelect
+        );
+
+        const messageForm = document.getElementById('message-form');
+        const messageInput = document.getElementById('message-input');
+        const targetUserIdInput = document.getElementById('target-user-id');
+        const userInfo = document.getElementById('user-info');
+
+        webrtc.onMessage = (message, fromUserId) => {
+            chatComponent.addMessage(`${fromUserId}: ${message.text}`);
+        };
+        webrtc.onPrivateMessage = (message, fromUserId) => {
+            chatComponent.addPrivateMessage(fromUserId, message.text);
+        };
+        function sendprivatemessage(targetUserId) {
+            webrtc.sendPrivateMessage({ text: 'Hello privately' }, targetUserId);
+            chatComponent.addPrivateMessage(targetUserId, 'Hello privately');
+        }
+
+        function handleChannelSelect(channel) {
+            ws.send(JSON.stringify({
+                type: 'join',
+                roomId: channel
+            }));
+        }
+
+        function connect() {
+            ws = new WebSocket(`ws://${window.location.host}`);
+
+            ws.onmessage = async (event) => {
+                const message = JSON.parse(event.data);
+                
+                switch (message.type) {
+                    case 'welcome':
+                        currentUserId = message.clientId;
+                        channelManager.renderChannels(message.channels);
+                        userInfo.textContent = `Connected as: ${currentUserId}`;
+                        break;
+
+                    case 'joined':
+                        currentRoom = message.roomId;
+                        messageInput.disabled = false;
+                        messageForm.querySelector('button').disabled = false;
+                        chatComponent.addMessage(`Joined channel #${message.roomId} with ${message.usersCount} users`, true);
+                        
+                        // Initialize WebRTC connections with existing users
+                        for (const userId of message.users) {
+                            if (userId !== currentUserId) {
+                                const offer = await webrtc.createOffer(userId);
+                                ws.send(JSON.stringify({
+                                    type: 'offer',
+                                    targetUserId: userId,
+                                    roomId: currentRoom,
+                                    data: offer
+                                }));
+                            }
+                        }
+                        break;
+
+                    case 'userJoined':
+                        chatComponent.addMessage(`User ${message.userId} joined the channel`, true);
+                        break;
+
+                    case 'userLeft':
+                        chatComponent.addMessage(`User ${message.userId} left the channel`, true);
+                        break;
+
+                    case 'offer':
+                        if (message.targetUserId === currentUserId) {
+                            const answer = await webrtc.handleOffer(message.userId, message.data);
+                            ws.send(JSON.stringify({
+                                type: 'answer',
+                                targetUserId: message.userId,
+                                roomId: currentRoom,
+                                data: answer
+                            }));
+                        }
+                        break;
+
+                    case 'answer':
+                        if (message.targetUserId === currentUserId) {
+                            await webrtc.handleAnswer(message.userId, message.data);
+                        }
+                        break;
+
+                    case 'ice-candidate':
+                        if (message.targetUserId === currentUserId) {
+                            await webrtc.addIceCandidate(message.userId, message.data);
+                        }
+                        break;
+                }
+            };
+
+            ws.onclose = () => {
+                chatComponent.addMessage('Disconnected from server', true);
+                userInfo.textContent = 'Disconnected';
+                setTimeout(connect, 1000);
+            };
+
+            webrtc.onIceCandidate = (targetUserId, candidate) => {
+                ws.send(JSON.stringify({
+                    type: 'ice-candidate',
+                    targetUserId,
+                    roomId: currentRoom,
+                    data: candidate
+                }));
+            };
+        }
+
+        messageForm.onsubmit = (e) => {
+            e.preventDefault();
+            const text = messageInput.value.trim();
+            const targetUserId = targetUserIdInput.value.trim();
+            if (text && currentRoom && targetUserId) {
+                const message = { text, targetUserId };
+                webrtc.sendPrivateMessage(message, targetUserId);
+                chatComponent.addPrivateMessage(targetUserId, text);
+                messageInput.value = '';
+                return;
+            }
+            if (text && currentRoom) {
+                const message = { text };
+                webrtc.broadcastMessage(message);
+                chatComponent.addMessage(`You: ${text}`);
+                messageInput.value = '';
+            }
+        };
+
+        connect();
+        function updateTimer() {
+            const elapsed = Math.floor((Date.now() - callStartTime) / 1000);
+            const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
+            const seconds = (elapsed % 60).toString().padStart(2, '0');
+            timerDisplay.textContent = `${minutes}:${seconds}`;
+        }
+
+        function startTimer() {
+            callStartTime = Date.now();
+            callTimer = setInterval(updateTimer, 1000);
+        }
+
+        function stopTimer() {
+            clearInterval(callTimer);
+            timerDisplay.textContent = '00:00';
+        }
+
+        async function startCall() {
+            const targetUserId = targetUserInput.value.trim();
+            if (!targetUserId) return;
+
+            try {
+                const offer = await webrtc.initiateCall(targetUserId);
+                activeCall = true;
+                startCallBtn.disabled = true;
+                endCallBtn.disabled = false;
+                activeCallDiv.style.display = 'block';
+                remoteUserSpan.textContent = targetUserId;
+                callStatus.textContent = 'Calling...';
+                startTimer();
+                
+                // Here you would normally send the offer to the target user
+                // through your signaling channel
+                console.log('Call offer created:', offer);
+            } catch (error) {
+                console.error('Failed to start call:', error);
+                callStatus.textContent = 'Call failed: ' + error.message;
+            }
+        }
+
+        async function endCall() {
+            const targetUserId = targetUserInput.value.trim();
+            if (!targetUserId) return;
+
+            await webrtc.endCall(targetUserId);
+            activeCall = false;
+            startCallBtn.disabled = false;
+            endCallBtn.disabled = true;
+            activeCallDiv.style.display = 'none';
+            stopTimer();
+            callStatus.textContent = 'Call ended';
+        }
+
+        // Handle incoming stream
+        webrtc.onStream = (stream, userId) => {
+            callStatus.textContent = 'Connected';
+            // Create an audio element to play the remote stream
+            const audio = new Audio();
+            audio.srcObject = stream;
+            audio.play();
+        };
+
+        startCallBtn.addEventListener('click', startCall);
+        endCallBtn.addEventListener('click', endCall);
+    </script>
+</body>
+</html>
