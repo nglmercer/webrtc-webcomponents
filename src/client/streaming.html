@@ -1,0 +1,164 @@
+<!-- streaming.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stream Room</title>
+    <style>
+        .stream-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .stream-video {
+            width: 100%;
+            max-width: 1280px;
+            background: #000;
+        }
+
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .control-button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .start-button {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .stop-button {
+            background: #f44336;
+            color: white;
+        }
+
+        .room-info {
+            margin-top: 20px;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="stream-container">
+        <video id="streamVideo" class="stream-video" autoplay playsinline></video>
+        <div id="streamerControls" class="controls" style="display: none;">
+            <button id="startStream" class="control-button start-button">Start Streaming</button>
+            <button id="stopStream" class="control-button stop-button" disabled>Stop Streaming</button>
+        </div>
+        <div id="roomInfo" class="room-info">
+            <p>Room ID: <span id="roomIdDisplay"></span></p>
+            <p>Share URL: <span id="shareUrl"></span></p>
+        </div>
+    </div>
+
+    <script type="module">
+        import { WebRTCManager } from './webrtc.js';
+
+        let ws;
+        let currentRoom = null;
+        let currentUserId = null;
+        const webrtc = new WebRTCManager();
+        webrtc.onMessage = (message, fromUserId) => {
+            console.log(`Message from ${fromUserId}: ${message.text}`);
+        };
+        webrtc.onPrivateMessage = (message, fromUserId) => {
+            console.log(`Private message from ${fromUserId}: ${message.text}`);
+        };
+        function handleChannelSelect(channel) {
+            ws.send(JSON.stringify({
+                type: 'join',
+                roomId: channel
+            }));
+        }
+        if (window.location) {
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomId = urlParams.get('room') || crypto.randomUUID();
+            const isStreamer = urlParams.get('role') === 'streamer';
+            currentRoom = roomId;
+            currentUserId = isStreamer ? null : crypto.randomUUID();
+            const shareUrl = `${window.location.origin}/streaming.html?room=${roomId}`;
+            document.getElementById('roomIdDisplay').textContent = roomId;
+            document.getElementById('shareUrl').textContent = shareUrl;
+            setTimeout(() => {
+                handleChannelSelect(roomId);
+            }, 1000);
+        }
+        function connect() {
+            ws = new WebSocket(`ws://${window.location.host}`);
+            ws.onmessage = async (event) => {
+                const message = JSON.parse(event.data);
+                switch (message.type) {
+                    case 'welcome':
+                    currentUserId = message.clientId;
+                    break;
+
+                    case 'joined':
+                    currentRoom = message.roomId;
+                    for (const userId of message.users) {
+                            if (userId !== currentUserId) {
+                                const offer = await webrtc.createOffer(userId);
+                                ws.send(JSON.stringify({
+                                    type: 'offer',
+                                    targetUserId: userId,
+                                    roomId: currentRoom,
+                                    data: offer
+                                }));
+                            }
+                        }
+                    case 'offer':
+                    if (message.targetUserId === currentUserId) {
+                        const answer = await webrtc.handleOffer(message.userId, message.data);
+                        ws.send(JSON.stringify({
+                            type: 'answer',
+                            targetUserId: message.userId,
+                            roomId: currentRoom,
+                            data: answer
+                        }));
+                    }
+                    break;
+                    case 'answer':
+                        if (message.targetUserId === currentUserId) {
+                            await webrtc.handleAnswer(message.userId, message.data);
+                        }
+                        break;
+
+                    case 'ice-candidate':
+                        if (message.targetUserId === currentUserId) {
+                            await webrtc.addIceCandidate(message.userId, message.data);
+                        }
+                        break;
+                    default:
+                        console.log(message);
+                        break;
+                }
+            };
+            ws.onclose = () => {
+                setTimeout(connect, 1000);
+            };
+
+            webrtc.onIceCandidate = (targetUserId, candidate) => {
+                ws.send(JSON.stringify({
+                    type: 'ice-candidate',
+                    targetUserId,
+                    roomId: currentRoom,
+                    data: candidate
+                }));
+            };
+        }
+        connect();
+        
+    </script>
+</body>
+</html>

@@ -1,100 +1,53 @@
-// viewer.html
 <!DOCTYPE html>
 <html>
 <head>
     <title>Viewer</title>
-    <style>
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        .stream {
-            width: 100%;
-            max-width: 640px;
-            margin: 20px 0;
-        }
-    </style>
+
 </head>
-<body>
-    <div class="container">
-        <h2>Viewer</h2>
-        <video id="stream" class="stream" autoplay></video>
-    </div>
-    <script>
-        const urlParams = new URLSearchParams(window.location.search);
-        const streamId = urlParams.get('streamId');
-        const ws = new WebSocket('ws://' + window.location.hostname + ':3000');
-        console.log('Connecting to server...', streamId, ws);
-        let peerConnection = null;
+<!-- Add this to your existing HTML -->
+<div class="streaming-controls">
+    <button id="createStream" class="stream-button">Create Stream</button>
+    <button id="joinStream" class="stream-button">Join Stream</button>
+    <input type="text" id="streamRoomId" placeholder="Enter Stream Room ID">
+</div>
 
-        if (!streamId) {
-            alert('No stream ID provided!');
-        }
+<style>
+.streaming-controls {
+    margin: 10px;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
 
-        ws.onopen = () => {
-            console.log('Connected to server');
-            ws.send(JSON.stringify({
-                type: 'join',
-                roomId: streamId
-            }));
-        };
+.stream-button {
+    padding: 8px 16px;
+    margin-right: 10px;
+    border: none;
+    border-radius: 4px;
+    background-color: #4CAF50;
+    color: white;
+    cursor: pointer;
+}
 
-        ws.onmessage = async (event) => {
-            const message = JSON.parse(event.data);
-            
-            switch (message.type) {
-                case 'offer':
-                    await handleOffer(message.data);
-                    break;
-                    
-                case 'ice-candidate':
-                    if (message.data) {
-                        await peerConnection.addIceCandidate(new RTCIceCandidate(message.data));
-                    }
-                    break;
-            }
-        };
+.stream-button:hover {
+    background-color: #45a049;
+}
+</style>
 
-        async function handleOffer(offer) {
-            try {
-                if (peerConnection) {
-                    peerConnection.close();
-                }
+<script>
+// Add this to your existing JavaScript
+document.getElementById('createStream').onclick = () => {
+    const streamId = crypto.randomUUID();
+    window.open(`/streaming.html?room=${streamId}&role=streamer`, '_blank');
+};
 
-                peerConnection = new RTCPeerConnection({
-                    iceServers: [
-                        { urls: 'stun:stun.l.google.com:19302' }
-                    ]
-                });
-
-                peerConnection.ontrack = (event) => {
-                    document.getElementById('stream').srcObject = event.streams[0];
-                };
-
-                peerConnection.onicecandidate = (event) => {
-                    if (event.candidate) {
-                        ws.send(JSON.stringify({
-                            type: 'ice-candidate',
-                            roomId: streamId,
-                            data: event.candidate
-                        }));
-                    }
-                };
-
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-                const answer = await peerConnection.createAnswer();
-                await peerConnection.setLocalDescription(answer);
-
-                ws.send(JSON.stringify({
-                    type: 'answer',
-                    roomId: streamId,
-                    data: answer
-                }));
-            } catch (error) {
-                console.error('Error handling offer:', error);
-            }
-        }
-    </script>
-</body>
+document.getElementById('joinStream').onclick = () => {
+    const roomId = document.getElementById('streamRoomId').value.trim();
+    if (roomId) {
+        window.open(`/streaming.html?room=${roomId}`, '_blank');
+    } else {
+        alert('Please enter a Stream Room ID');
+    }
+};
+</script>
 </html>

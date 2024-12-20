@@ -17,7 +17,6 @@
     </div>
 
     <div class="main-content">
-        <group-call id="group-call"></group-call>
             <div class="call-controls">
         <input type="text" id="target-user" placeholder="Enter user ID to call">
         <button id="start-call" class="call-button">Start Call</button>
@@ -51,13 +50,6 @@
         let currentRoom = null;
         let currentUserId = null;
         const webrtc = new WebRTCManager();
-        const groupCall = document.getElementById('group-call');
-        groupCall.setWebRTCManager(webrtc, currentUserId);
-
-        // Añadir un stream remoto cuando se recibe una pista
-        webrtc.onStream = (stream, userId) => {
-        groupCall.addRemoteStream(userId, stream);
-        };
 
         const channelManager = new ChannelManager(
             document.getElementById('channel-list'),
